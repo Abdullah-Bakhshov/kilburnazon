@@ -7,28 +7,50 @@ interface Employee {
   name: string;
   position: string;
   department: string;
+  email: string;
 }
 
-interface Log {
+interface AuditLog {
   id: number;
   employee_id: number;
-  action: string;
-  details: string;
-  timestamp: string;
+  name: string;
+  position: string;
+  department: string;
+  email: string;
+  termination_date: string;
+  terminated_by: number;
+  termination_reason?: string;
+}
+
+interface TerminationRequest {
+  employee_id: number;
+  terminated_by: number;
+  reason?: string;
+}
+
+interface TerminationResponse {
+  message?: string;
+  error?: string;
+  employee?: {
+    id: number;
+    name: string;
+    termination_date: string;
+  };
 }
 
 const TerminateEmployeePage = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [logs, setLogs] = useState<Log[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
+  const [terminationReason, setTerminationReason] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const BASE_URL = 'http://localhost/workshop/connect.php'; // Your backend URL
+  const BASE_URL = 'http://localhost/workshop/connect.php';
 
-  // Fetch all employees
   const fetchEmployees = async () => {
     try {
       const response = await fetch(`${BASE_URL}?action=getemployees`);
+      if (!response.ok) throw new Error('Failed to fetch employees');
       const data = await response.json();
       setEmployees(data);
     } catch (error) {
@@ -36,52 +58,65 @@ const TerminateEmployeePage = () => {
     }
   };
 
-  // Fetch termination logs
-  const fetchTerminationLogs = async () => {
+  const fetchAuditLogs = async () => {
     try {
-      const response = await fetch(`${BASE_URL}?action=getTerminationLogs`);
+      const response = await fetch(`${BASE_URL}?action=getAuditLogs`);
+      if (!response.ok) throw new Error('Failed to fetch audit logs');
       const data = await response.json();
-      setLogs(data);
+      setAuditLogs(data);
     } catch (error) {
-      console.error('Error fetching termination logs:', error);
+      console.error('Error fetching audit logs:', error);
     }
   };
 
-  const terminateEmployee = async (employeeId: number) => {
-    if (selectedEmployeeId === null) {
-      alert("Please select an employee to terminate.");
+  const terminateEmployee = async () => {
+    if (!selectedEmployeeId) {
       return;
     }
 
-    const currentUserId = 1;  // The ID of the user who is terminating the employee (should be dynamically set)
-
+    const currentUserId = 1;
     setIsLoading(true);
+
     try {
+      const terminationData: TerminationRequest = {
+        employee_id: selectedEmployeeId,
+        terminated_by: currentUserId,
+        reason: terminationReason.trim() || undefined,
+      };
+
       const response = await fetch(`${BASE_URL}?action=terminateEmployee`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employee_id: employeeId,
-          terminated_by: currentUserId,
-        }),
+        body: JSON.stringify(terminationData),
       });
-      const data = await response.json();
-      if (data.message) {
-        alert(data.message);
-        fetchEmployees(); // Refresh the employee list after termination
-        fetchTerminationLogs(); // Refresh the logs after termination
-      } else {
-        alert(data.error || 'Error terminating employee');
+
+      if (!response.ok) throw new Error('Termination request failed');
+
+      const data: TerminationResponse = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
       }
+
+      // Reset form
+      setSelectedEmployeeId(null);
+      setTerminationReason('');
+
+      // Refresh data
+      await Promise.all([fetchEmployees(), fetchAuditLogs()]);
+
+      // Show success message
+      alert(data.message || 'Employee terminated successfully');
     } catch (error) {
-      console.error('Error terminating employee:', error);
+      console.error('Error during termination:', error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   useEffect(() => {
     fetchEmployees();
-    fetchTerminationLogs(); // Fetch logs on component mount
+    fetchAuditLogs();
   }, []);
 
   return (
@@ -91,47 +126,82 @@ const TerminateEmployeePage = () => {
       <div className="bg-white p-6 rounded-xl shadow-md mb-8">
         <h2 className="text-xl font-semibold text-teal-700 mb-4">Select an Employee to Terminate</h2>
 
-        <select
-          onChange={(e) => setSelectedEmployeeId(Number(e.target.value))}
-          className="p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-gray-900 mb-4"
-        >
-          <option value="">Select Employee</option>
-          {employees.map((employee) => (
-            <option key={employee.id} value={employee.id}>
-              {employee.name} - {employee.position}
-            </option>
-          ))}
-        </select>
+        <div className="space-y-4">
+          <select
+            value={selectedEmployeeId || ''}
+            onChange={(e) => setSelectedEmployeeId(Number(e.target.value))}
+            className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-gray-900"
+          >
+            <option value="">Select Employee</option>
+            {employees.map((employee) => (
+              <option key={employee.id} value={employee.id}>
+                {employee.name} - {employee.position} ({employee.department})
+              </option>
+            ))}
+          </select>
 
-        <button
-          onClick={() => terminateEmployee(selectedEmployeeId as number)}
-          className="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition"
-          disabled={isLoading}
-        >
-          {isLoading ? 'Terminating...' : 'Terminate Employee'}
-        </button>
+          <textarea
+            value={terminationReason}
+            onChange={(e) => setTerminationReason(e.target.value)}
+            placeholder="Termination Reason (Optional)"
+            className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-gray-900"
+            rows={3}
+          />
+
+          <button
+            onClick={terminateEmployee}
+            className="w-full bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition disabled:opacity-50"
+            disabled={isLoading || !selectedEmployeeId}
+          >
+            {isLoading ? 'Processing...' : 'Terminate Employee'}
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white text-black p-6 rounded-xl shadow-md mt-8">
-        <h2 className="text-xl font-semibold text-teal-700 mb-4">Employee List</h2>
-        <ul>
-          {employees.map((employee) => (
-            <li key={employee.id} className="mb-4">
-              <p>{employee.name} - {employee.position}</p>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-md">
+          <h2 className="text-xl font-semibold text-teal-700 mb-4 text-black">Active Employees</h2>
+          <div className="space-y-2">
+            {employees.map((employee) => (
+              <div key={employee.id} className="p-3 border rounded-lg hover:bg-gray-50">
+                <p className="font-medium text-black">{employee.name}</p>
+                <p className="text-sm text-gray-600">
+                  {employee.position} - {employee.department}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-md mt-8">
-        <h2 className="text-xl font-semibold text-teal-700 mb-4">Termination Logs</h2>
-        <ul>
-          {logs.map((log) => (
-            <li key={log.id} className="mb-4">
-              <p><strong>Employee ID:</strong> {log.employee_id} | <strong>Action:</strong> {log.action} | <strong>Details:</strong> {log.details} | <strong>Timestamp:</strong> {log.timestamp}</p>
-            </li>
-          ))}
-        </ul>
+        <div className="bg-white p-6 rounded-xl shadow-md">
+          <h2 className="text-xl font-semibold text-teal-700 mb-4 text-black">Termination History</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full table-auto border-collapse">
+              <thead className="bg-teal-100">
+                <tr>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Name</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Position</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Department</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Termination Date</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Terminated By</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {auditLogs.map((log) => (
+                  <tr key={log.id}>
+                    <td className="px-4 py-2 text-sm text-black">{log.name}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">{log.position}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">{log.department}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">{new Date(log.termination_date).toLocaleDateString()}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">ID {log.terminated_by}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">{log.termination_reason || 'N/A'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   );
